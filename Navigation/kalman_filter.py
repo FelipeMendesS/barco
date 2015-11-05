@@ -1,55 +1,97 @@
 import math
 import serial
 import numpy as np
+import pickle
+import matplotlib.pyplot as plt
 
-Q_angle = 0.01
-Q_gyro = 0.0003
-R_angle = 0.03
+def kalmanCalculate(lastAngle, newAngle, newRate, Pk, biask):
+    lastAngle[0] += dt * (newRate[0] - biask[0])
+    lastAngle[1] += dt * (newRate[1] - biask[1])
+    lastAngle[2] += dt * (newRate[2] - biask[2])
+    Pk[0][0] += - dt * (Pk[1][0] + Pk[0][1]) + qAngle * dt
+    Pk[0][1] += - dt * Pk[1][1]
+    Pk[1][0] += - dt * Pk[1][1]
+    Pk[1][1] += + qGyro * dt
 
-x_bias = 0
-y_bias = 0
-z_bias = 0
-P_00 = 0
-P_01 = 0
-P_10 = 0
-P_11 = 0
+    Y = []
+    Y.append(newAngle[0] - lastAngle[0])
+    Y.append(newAngle[1] - lastAngle[1])
+    Y.append(newAngle[2] - lastAngle[2])
+    S = Pk[0][0] + rAngle
+    k = []
+    k.append(Pk[0][0] / S)
+    k.append(Pk[1][0] / S)
 
+    lastAngle[0] += k[0] * Y[0]
+    lastAngle[1] += k[0] * Y[1]
+    lastAngle[2] += k[0] * Y[2]
+    biask[0] += k[1] * Y[0]
+    biask[1] += k[1] * Y[1]
+    biask[2] += k[1] * Y[2]
+    Pk[0][0] -= k[0] * Pk[0][0]
+    Pk[0][1] -= k[0] * Pk[0][1]
+    Pk[1][0] -= k[1] * Pk[0][0]
+    Pk[1][1] -= k[1] * Pk[0][1]
+
+    return (lastAngle, Pk, biask)
+
+# Sensor constants
+qAngle = 0.01
+qGyro = 0.0003
+rAngle = 0.03
+
+# Bias and P initial values
+bias = [0, 0, 0]
+P = [[0, 0], [0, 0]]
+
+# Time interval between measurements
 dt = 0.18
-newAngle = []
-newRate = []
-newAngle.append(atan2(accy/accz))
-newAngle.append(atan2(accz/accx))
-newAngle.append(atan2(accx/accy))
-newRate.append(gyrox)
-newRatey.append(gyroy)
-newRatez.append(gyroz)
+
+# Get data
+with open('imuData', 'rb') as f:
+    dataMatrix = pickle.load(f)
+
+acc = dataMatrix[1:4]
+gyro = dataMatrix[4:7]
+
+filteredMatrix = []
+initialAngle = []
+for j in range(3):
+    filteredMatrix.append([])
+    initialAngle.append([])
+
+filteredAngle = [0, 0, 0]
 
 
-def kalmanCalculate(newAngle, newRate, dt):
-    x_angle += dt * (newRate[1] - x_bias)
-    y_angle += dt * (nemRate[2] - y_bias)
-    z_angle += dt * (nemRate[3] - z_bias)
-    P_00 += - dt * (P_10 + P_01) + Q_angle * dt
-    P_01 += - dt * P_11
-    P_10 += - dt * P_11
-    P_11 += + Q_gyro * dt
+for i in range(len(dataMatrix[0])):
+    measuredAngle = []
+    measuredRate = []
+    measuredAngle.append(math.atan2(acc[1][i], acc[2][i]))
+    measuredAngle.append(math.atan2(acc[2][i], acc[0][i]))
+    measuredAngle.append(math.atan2(acc[0][i], acc[1][i]))
+    measuredRate.append(gyro[0][i])
+    measuredRate.append(gyro[1][i])
+    measuredRate.append(gyro[2][i])
+    for k in range(3):
+        initialAngle[k].append(measuredAngle[k])
+        if i==0:
+            filteredAngle[k] = measuredAngle[k]
+    filteredAngle, P, bias = kalmanCalculate(filteredAngle, measuredAngle, measuredRate, P, bias)
+    for j, item in enumerate(filteredAngle):
+        filteredMatrix[j].append(item)
 
-    y_x = newAnglex - x_angle
-    y_y = newAngley - y_angle
-    y_z = newAnglez - z_angle
-    S = P_00 + R_angle
-    K_0 = P_00 / S
-    K_1 = P_10 / S
+for i in range(3):
+    for j in range(len(filteredMatrix[0])):
+        filteredMatrix[i][j] = math.degrees(filteredMatrix[i][j])
+        initialAngle[i][j] = math.degrees(initialAngle[i][j])
 
-    x_angle += K_0 * y_x
-    y_angle += K_0 * y_y
-    z_angle += K_0 * y_z
-    x_bias += K_1 * y_x
-    y_bias += K_1 * y_y
-    z_bias += K_1 * y_z
-    P_00 -= K_0 * P_00
-    P_01 -= K_0 * P_01
-    P_10 -= K_1 * P_00
-    P_11 -= K_1 * P_01
-    angles = [x_angle, y_angle, z_angle]
-    return angles
+# plt.plot(filteredMatrix[0],'bs-', initialAngle[0], 'b*-')
+# plt.plot(filteredMatrix[1],'rs-', initialAngle[1], 'r*-')
+# plt.plot(filteredMatrix[2],'gs-', initialAngle[2], 'g*-')
+plt.plot(dataMatrix[7],'bs-')
+plt.plot(dataMatrix[8],'rs-')
+plt.plot(dataMatrix[9],'gs-')
+
+plt.show()
+
+
